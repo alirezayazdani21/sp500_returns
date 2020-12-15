@@ -1,0 +1,103 @@
+
+library(quantmod)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+invisible(options(scipen=999))
+
+##########################################################
+##########################################################
+getSymbols("^GSPC",src="yahoo",from=as.Date('2005-01-01'), 
+           to=as.Date('2020-12-31'))
+
+sp500<-fortify.zoo(GSPC$GSPC.Close) %>% mutate(Returns=as.numeric(ROC(GSPC$GSPC.Close))) %>% na.omit(.)
+colnames(sp500)<-c("date","SP500_Index","Returns")
+
+###################################################
+###################################################
+
+sp500_pre08<-sp500 %>% filter(date < '2008-06-30') %>% mutate(sub_period="pre08")
+sp500_mid0809<-sp500 %>% filter('2008-07-01' <= date & date < '2009-03-31') %>% mutate(sub_period="crisis-08")
+sp500_pre20<-sp500 %>% filter('2009-04-01' <= date & date < '2020-01-31')%>% mutate(sub_period="pre20")
+sp500_mid20<-sp500 %>% filter('2020-02-01' <= date)%>% mutate(sub_period="pandemic-20")
+
+sp500_regs<-rbind.data.frame(sp500_pre08,sp500_mid0809,sp500_pre20,sp500_mid20)
+sp500_regs$sub_period<-factor(sp500_regs$sub_period,levels=c("pre08","crisis-08","pre20","pandemic-20"))
+
+splev<-ggplot(sp500_regs,aes(x=date,y=SP500_Index))+
+  geom_line(col="blue")+xlab("")
+
+spret<-ggplot(sp500_regs,aes(x=date,y=Returns))+
+  geom_line(col="red")+xlab("")+
+  annotate("text", x=as.Date("2008-09-30"), y=0.12, label= "crisis-2008", size=3)+
+  annotate("text", x=as.Date("2020-06-30"), y=0.12, label= "Pandemic-2020", size=3)+
+  geom_vline(xintercept = as.numeric(as.Date("2008-06-30")), linetype=4,color = "blue")+
+  geom_vline(xintercept = as.numeric(as.Date("2009-03-31")), linetype=4,color = "blue")+
+  geom_vline(xintercept = as.numeric(as.Date("2020-02-01")), linetype=4,color = "blue")+
+  geom_vline(xintercept = as.numeric(as.Date("2020-12-31")), linetype=4,color = "blue")
+
+
+ggregbox<- ggplot(sp500_regs, aes(x= reorder(sub_period,date, FUN = min), y=Returns,fill=sub_period))+  
+  geom_violin(alpha = 0.2 )+ylab("Returns") +
+  xlab("") + theme(legend.position = "none")
+
+ggregden<- ggplot(sp500_regs,aes(x=Returns, color=sub_period, fill=sub_period)) +
+  geom_density(alpha=0.2)+ theme(legend.position = "top", 
+                                 legend.title = element_blank(),
+                                 legend.text = element_text(size = 8),
+                                 legend.spacing.y = unit(0.1, 'cm'),
+  ) + ylab("")+xlab("")
+
+##########################################################
+##########################################################
+grid.arrange(arrangeGrob(splev,spret, nrow=2, ncol=1),
+             arrangeGrob(ggregbox,ggregden, ncol=2))
+##########################################################
+##########################################################
+#Summary Statistics
+sum_fun<-function(x){round(rbind(
+  min(x),
+  quantile(x,0.05),
+  mean(x),
+  median(x),
+  quantile(x,0.95),
+  max(x),
+  sd(x),
+  moments::skewness(x),
+  moments::kurtosis(x)
+),3)
+}
+
+sum_df<-rbind.data.frame("Min",
+                         "5th_pctl",
+                         "Mean",
+                         "Median",
+                         "95th_pctl",
+                         "Max",
+                         "St_Dev",  
+                         "Skewness",
+                         "Kurtosis"
+)
+colnames(sum_df)<-"Metric"
+
+sum_df<- sum_df %>% mutate(pre08=sum_fun(sp500_pre08$Return),
+                           crisis08=sum_fun(sp500_mid0809$Return),
+                           pre20=sum_fun(sp500_pre20$Return),
+                           pandemic20=sum_fun(sp500_mid20$Return))
+
+library(gt)
+
+sum_df %>% 
+  gt(.) %>% 
+  tab_header(title = "SP500 Index Returns Summary (2005-2020)") %>%
+  tab_style(
+    style = cell_text(style = "italic",weight="bold"),
+    locations = cells_body(
+      columns = vars(Metric)
+    )
+  ) %>% 
+  tab_style(
+    style = cell_text(style = "italic",weight="bold"),
+    locations = cells_column_labels(columns = 1:5)
+  ) 
+
